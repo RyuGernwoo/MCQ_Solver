@@ -4,6 +4,10 @@
 # Captured images (large binary files)
 captured_images/
 
+# YOLOv8 학습 결과물
+runs/
+dataset_bbox/
+
 # Python
 __pycache__/
 *.pyc
