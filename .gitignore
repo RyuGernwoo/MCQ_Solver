@@ -1,0 +1,21 @@
+# API Keys / Secrets
+.env
+
+# Captured images (large binary files)
+captured_images/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
