@@ -27,8 +27,8 @@ DATASET_DST = PROJECT_DIR / "dataset_bbox"
 # 학습 하이퍼파라미터
 MODEL_SIZE = "yolov8n.pt"   # nano 모델 (Jetson 온디바이스 추론 최적)
 EPOCHS = 150                # 데이터 47장 소규모이므로 충분한 에포크
-BATCH_SIZE = 8              # Jetson Orin Nano VRAM 고려
-IMG_SIZE = 640              # YOLOv8 기본 입력 크기
+BATCH_SIZE = 4              # Jetson Orin Nano 공유 메모리(7.6GB) 고려
+IMG_SIZE = 480              # 메모리 절약을 위해 축소 (640 → 480)
 VAL_RATIO = 0.2             # 검증 데이터 비율 (약 9장)
 
 RANDOM_SEED = 42
@@ -216,7 +216,7 @@ def train_model(data_yaml_path: Path):
         patience=30,        # Early stopping
 
         # 기타
-        workers=4,
+        workers=2,
         seed=RANDOM_SEED,
         verbose=True,
     )

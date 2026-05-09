@@ -8,6 +8,9 @@ captured_images/
 runs/
 dataset_bbox/
 
+# TensorRT 엔진 (바이너리, 아키텍처 종속)
+*.engine
+
 # Python
 __pycache__/
 *.pyc
@@ -23,3 +26,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# pt
+*.pt
