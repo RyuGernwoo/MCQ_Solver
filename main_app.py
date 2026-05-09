@@ -209,11 +209,17 @@ def parse_args():
 # 카메라 관련 유틸리티
 # ============================================================
 def camera_candidates(camera_arg):
+    """
+    Jetson + V4L2 환경에서는 정수 인덱스로 열면 실패하므로
+    문자열 경로(/dev/videoN)만 사용합니다.
+    """
     if camera_arg != "auto":
-        return [int(camera_arg) if camera_arg.isdigit() else camera_arg]
+        if camera_arg.isdigit():
+            return [f"/dev/video{camera_arg}"]
+        return [camera_arg]
+
     candidates = []
     for idx in range(4):
-        candidates.append(idx)
         video_path = f"/dev/video{idx}"
         if os.path.exists(video_path):
             candidates.append(video_path)
@@ -221,19 +227,26 @@ def camera_candidates(camera_arg):
 
 
 def open_camera(camera_arg, width, height, fps):
+    """
+    Jetson oCam-5CRO-U 전용 카메라 열기.
+    - 문자열 경로(/dev/videoN)만 사용 (정수 인덱스는 V4L2에서 실패)
+    - 포맷 설정 후 1.0s 대기 (oCam 초기화 시간 확보)
+    """
     fourcc = cv2.VideoWriter_fourcc(*"YUYV")
     for camera_id in camera_candidates(camera_arg):
-        cap = cv2.VideoCapture(camera_id, cv2.CAP_V4L2)
+        print(f"  시도 중: {camera_id}")
+        cap = cv2.VideoCapture(str(camera_id), cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FOURCC, fourcc)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         cap.set(cv2.CAP_PROP_FPS, fps)
-        time.sleep(0.2)
+        time.sleep(1.0)  # oCam 초기화 대기 (0.2s는 너무 짧음)
         if cap.isOpened():
             ret, frame = cap.read()
             if ret:
                 return camera_id, cap, frame
         cap.release()
+        time.sleep(0.3)  # 다음 장치 시도 전 해제 대기
     return None, None, None
 
 
