@@ -502,6 +502,15 @@ def draw_guideline(frame):
 def main():
     args = parse_args()
 
+    # --- DISPLAY 자동 설정 (SSH/원격 터미널에서 실행 시 필요) ---
+    # X11 세션(:0)이 존재하지만 환경변수가 없는 경우 자동으로 설정합니다.
+    if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        os.environ["DISPLAY"] = ":0"
+        print("ℹ️  DISPLAY 환경변수 없음 → :0 으로 자동 설정")
+
+    # Qt 폰트 디렉토리 경고 억제
+    os.environ.setdefault("QT_LOGGING_RULES", "*.debug=false;qt.qpa.*=false")
+
     # --- 모델 로드 ---
     model_path = Path(args.model)
     if not model_path.exists():
