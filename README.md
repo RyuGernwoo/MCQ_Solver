@@ -1,6 +1,6 @@
 # MCQ Solver (Multiple Choice Question)
 
-## 객관식 자동 정답 표시 시스템\nOn-Device MCQ Solver (with Jetson Orin Nano)
+## 객관식 자동 정답 표시 시스템<br>On-Device MCQ Solver (with Jetson Orin Nano)
 
 > **Jetson Orin Nano + oCam-5CRO-U + YOLOv11 + Gemma 3 4B (로컬)**  
 > 카메라로 객관식 문제를 촬영하면 **수학·과학·언어·사회 등 어떤 분야든** 자동으로 정답을 탐지하여 실시간으로 표시하는 완전 오프라인 온디바이스 AI 시스템
@@ -40,7 +40,7 @@ YOLOv11 선지 탐지 (30fps)
 │ 화면 상태 배너 (우상단 실시간 표시)           │
 │                                             │
 │  [문제 인식 중] → [Gemma 3 solving...] →     │
-│  [Answer: N]                                │
+│  [Answer: X]                                │
 └─────────────────────────────────────────────┘
     │
     ▼
@@ -234,7 +234,7 @@ where N is one of 1, 2, 3, 4, or 5. Do not include any explanation.
 
 ## 📚 데이터셋
 - 활용 데이터셋 : [EBS 모의고사](https://www.ebsi.co.kr/ebs/xip/xipa/retrieveSCVPreparation.ebs?irecord=202605073&targetCd=D300&cookieGradeVal=high3)
-- 라벨링 데이터셋 : [MCQ Dataset](https://app.roboflow.com/zs-workspace-sdslq/mcq_solver/models)
+- 라벨링 데이터셋 : [MCQ Dataset (Roboflow)](https://app.roboflow.com/zs-workspace-sdslq/mcq_solver/models)
 
 ---
 
