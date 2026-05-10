@@ -2,20 +2,19 @@
 수능 수학 객관식 자동 정답 표시 시스템 — 메인 애플리케이션 (온디바이스)
 
 기능:
-  - Main Thread: 카메라 프레임 읽기 → YOLOv11 실시간 추론 → 화면 출력
-  - Worker Thread: 사용자 캡처(Spacebar) → Gemma 4 로컬 추론 → 정답 반환
+  - Main Thread: 카메라 프레임 → YOLOv11 실시간 추론 → 자동 문제 인식 → 화면 출력
+  - Worker Thread: 문제 감지 시 자동으로 Gemma 4 로컬 추론 → 정답 반환
   - 정답 번호 + YOLOv11 Bounding Box 매칭 → Alpha Blending 하이라이트
 
-사용법:
-  python main_app.py [--model MODEL_PATH] [--camera CAMERA] [--conf 0.5]
+자동 동작:
+  YOLOv11이 선지를 3개 이상 탐지하면 자동으로 Gemma 4 추론을 시작합니다.
+  '문제 인식 중' → '추론 중' → '정답: N번' 상태가 화면에 실시간 표시됩니다.
 
 키 조작:
-  Spacebar : 현재 프레임을 Gemma 4 로컬 모델로 분석
-  q        : 프로그램 종료
+  q : 프로그램 종료
 """
 
 import argparse
-import base64
 import json
 import os
 import re
@@ -37,43 +36,104 @@ DEFAULT_MODEL = PROJECT_DIR / "runs" / "option_detect" / "weights" / "best.pt"
 WINDOW_NAME = "Math Solver — Jetson (On-Device)"
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
-# Gemma 4 로컬 모델 설정
 GEMMA_MODEL = "gemma4:latest"
 
 # YOLOv11 클래스 인덱스 → 선지 번호 매핑
 CLASS_TO_OPTION = {0: 1, 1: 2, 2: 3, 3: 4, 4: 5}
 OPTION_TO_CLASS = {v: k for k, v in CLASS_TO_OPTION.items()}
 
-# 하이라이트 색상 (형광 연두색)
+# 하이라이트 색상
 HIGHLIGHT_COLOR = (0, 255, 128)
 HIGHLIGHT_ALPHA = 0.35
 
-# 정답 표시 유지 시간 (초)
-ANSWER_DISPLAY_DURATION = 10.0
+# 자동 인식 설정
+MIN_OPTIONS_TO_TRIGGER = 3   # 이 개수 이상 선지가 탐지되면 자동 추론 시작
+STABLE_FRAMES_REQUIRED = 10  # 안정적으로 탐지되어야 하는 연속 프레임 수
+AUTO_COOLDOWN = 15.0         # 추론 완료 후 재추론까지 쿨다운 (초)
+ANSWER_DISPLAY_DURATION = 12.0  # 정답 표시 유지 시간 (초)
 
 
 # ============================================================
-# 공유 상태 (스레드 간)
+# 상태 관리 (Phase 기반)
 # ============================================================
+# Phase: IDLE → DETECTING → INFERRING → ANSWERED
+PHASE_IDLE = "idle"
+PHASE_DETECTING = "detecting"
+PHASE_INFERRING = "inferring"
+PHASE_ANSWERED = "answered"
+PHASE_ERROR = "error"
+
+
 class SharedState:
     """Main Thread와 Worker Thread 간 공유 상태를 관리합니다."""
 
     def __init__(self):
         self.lock = threading.Lock()
+        # 현재 단계
+        self.phase = PHASE_IDLE
+        # 캡처/추론
         self.capture_requested = False
         self.captured_frame = None
-        self.is_processing = False
+        # 결과
         self.answer_number = None
         self.answer_timestamp = 0.0
         self.error_message = None
+        # 자동 인식 카운터
+        self.stable_count = 0
+        self.last_inference_time = 0.0
+        # 탐지 현황 (화면 표시용)
+        self.detected_options = set()
 
-    def request_capture(self, frame):
+    def update_detection(self, detected_classes: set):
+        """매 프레임마다 호출: YOLO 탐지 결과를 기반으로 자동 추론 판단"""
         with self.lock:
-            if self.is_processing:
+            self.detected_options = detected_classes
+            num_detected = len(detected_classes)
+
+            # 쿨다운 중이면 무시
+            if time.time() - self.last_inference_time < AUTO_COOLDOWN:
+                if self.phase == PHASE_ANSWERED:
+                    # 정답 표시 시간 초과 시 IDLE로
+                    if time.time() - self.answer_timestamp > ANSWER_DISPLAY_DURATION:
+                        self.phase = PHASE_IDLE
+                        self.answer_number = None
+                return False
+
+            # 이미 추론 중이면 무시
+            if self.phase == PHASE_INFERRING:
+                return False
+
+            # 정답 표시 중이면 무시
+            if self.phase == PHASE_ANSWERED:
+                if time.time() - self.answer_timestamp > ANSWER_DISPLAY_DURATION:
+                    self.phase = PHASE_IDLE
+                    self.answer_number = None
+                return False
+
+            # 충분한 선지가 탐지되었는가?
+            if num_detected >= MIN_OPTIONS_TO_TRIGGER:
+                self.stable_count += 1
+                if self.phase == PHASE_IDLE:
+                    self.phase = PHASE_DETECTING
+                # 안정적으로 N 프레임 연속 탐지 시 추론 시작
+                if self.stable_count >= STABLE_FRAMES_REQUIRED:
+                    return True  # 추론 요청 신호
+            else:
+                self.stable_count = 0
+                if self.phase == PHASE_DETECTING:
+                    self.phase = PHASE_IDLE
+
+            return False
+
+    def request_inference(self, frame):
+        """추론 요청 (자동 트리거에서 호출)"""
+        with self.lock:
+            if self.phase == PHASE_INFERRING:
                 return False
             self.capture_requested = True
             self.captured_frame = frame.copy()
-            self.is_processing = True
+            self.phase = PHASE_INFERRING
+            self.stable_count = 0
             self.error_message = None
             return True
 
@@ -88,22 +148,32 @@ class SharedState:
         with self.lock:
             self.answer_number = answer_number
             self.answer_timestamp = time.time()
-            self.is_processing = False
+            self.last_inference_time = time.time()
+            self.phase = PHASE_ANSWERED
 
     def set_error(self, message):
         with self.lock:
             self.error_message = message
-            self.is_processing = False
+            self.last_inference_time = time.time()
+            self.phase = PHASE_ERROR
 
-    def get_state(self):
+    def get_display_state(self):
         with self.lock:
-            if (self.answer_number is not None
-                    and time.time() - self.answer_timestamp > ANSWER_DISPLAY_DURATION):
-                self.answer_number = None
+            # 에러/정답 표시 시간 초과 체크
+            if self.phase == PHASE_ANSWERED:
+                if time.time() - self.answer_timestamp > ANSWER_DISPLAY_DURATION:
+                    self.phase = PHASE_IDLE
+                    self.answer_number = None
+            if self.phase == PHASE_ERROR:
+                if time.time() - self.last_inference_time > 5.0:
+                    self.phase = PHASE_IDLE
+                    self.error_message = None
             return {
-                "is_processing": self.is_processing,
+                "phase": self.phase,
                 "answer_number": self.answer_number,
                 "error_message": self.error_message,
+                "stable_count": self.stable_count,
+                "detected_options": set(self.detected_options),
             }
 
 
@@ -111,10 +181,6 @@ class SharedState:
 # Worker Thread: Gemma 4 로컬 추론
 # ============================================================
 def gemma_worker(state: SharedState, stop_event: threading.Event):
-    """
-    백그라운드에서 대기하다가 캡처 요청이 들어오면
-    Ollama를 통해 Gemma 4 로컬 모델로 정답을 추론합니다.
-    """
     while not stop_event.is_set():
         frame = state.get_capture()
         if frame is None:
@@ -122,7 +188,6 @@ def gemma_worker(state: SharedState, stop_event: threading.Event):
             continue
 
         try:
-            # OpenCV BGR → JPEG 바이트로 인코딩
             success, jpeg_buf = cv2.imencode(".jpg", frame)
             if not success:
                 state.set_error("이미지 인코딩 실패")
@@ -147,26 +212,20 @@ def gemma_worker(state: SharedState, stop_event: threading.Event):
             raw_text = response["message"]["content"].strip()
             print(f"🤖 Gemma 4 응답: {raw_text}")
 
-            # JSON 파싱 시도
             answer = None
-            try:
-                # JSON 블록 추출
-                json_match = re.search(r'\{[^}]*"answer"\s*:\s*(\d+)[^}]*\}', raw_text)
-                if json_match:
-                    answer = int(json_match.group(1))
-                else:
-                    # 숫자만 있는 경우
-                    num_match = re.search(r'[1-5]', raw_text)
-                    if num_match:
-                        answer = int(num_match.group())
-            except (json.JSONDecodeError, ValueError):
-                pass
+            json_match = re.search(r'\{[^}]*"answer"\s*:\s*(\d+)[^}]*\}', raw_text)
+            if json_match:
+                answer = int(json_match.group(1))
+            else:
+                num_match = re.search(r'[1-5]', raw_text)
+                if num_match:
+                    answer = int(num_match.group())
 
             if answer in (1, 2, 3, 4, 5):
                 print(f"✅ Gemma 4 정답: {answer}번")
                 state.set_answer(answer)
             else:
-                state.set_error(f"유효하지 않은 응답: {raw_text[:30]}")
+                state.set_error(f"유효하지 않은 응답")
 
         except Exception as e:
             print(f"❌ Gemma 4 추론 에러: {e}")
@@ -178,7 +237,7 @@ def gemma_worker(state: SharedState, stop_event: threading.Event):
 # ============================================================
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="수능 수학 객관식 자동 정답 표시 시스템 (온디바이스)"
+        description="수능 수학 객관식 자동 정답 표시 시스템 (온디바이스, 자동 인식)"
     )
     parser.add_argument("--model", default=str(DEFAULT_MODEL), help="YOLO 모델 경로")
     parser.add_argument("--camera", default="auto", help="카메라 장치")
@@ -188,11 +247,15 @@ def parse_args():
     parser.add_argument("--height", type=int, default=720, help="카메라 높이")
     parser.add_argument("--fps", type=int, default=30, help="카메라 FPS")
     parser.add_argument("--llm", default=GEMMA_MODEL, help="Ollama LLM 모델명")
+    parser.add_argument("--min-options", type=int, default=MIN_OPTIONS_TO_TRIGGER,
+                        help="자동 추론 시작 최소 선지 탐지 수")
+    parser.add_argument("--cooldown", type=float, default=AUTO_COOLDOWN,
+                        help="추론 완료 후 재추론까지 쿨다운 (초)")
     return parser.parse_args()
 
 
 # ============================================================
-# 카메라 관련 유틸리티
+# 카메라 유틸리티
 # ============================================================
 def camera_candidates(camera_arg):
     if camera_arg != "auto":
@@ -238,8 +301,16 @@ def class_color(cls_id):
 
 
 # ============================================================
-# YOLO 탐지 결과에서 정답 Bounding Box 추출
+# YOLO 관련
 # ============================================================
+def get_detected_classes(result):
+    """YOLO 결과에서 탐지된 고유 클래스 집합을 반환합니다."""
+    classes = set()
+    for box in result.boxes:
+        classes.add(int(box.cls[0]))
+    return classes
+
+
 def find_answer_bbox(result, answer_number, names):
     if answer_number is None or answer_number not in OPTION_TO_CLASS:
         return None
@@ -257,7 +328,7 @@ def find_answer_bbox(result, answer_number, names):
 
 
 # ============================================================
-# Alpha Blending으로 정답 하이라이트 그리기
+# 그리기 함수들
 # ============================================================
 def draw_answer_highlight(frame, bbox, answer_number):
     if bbox is None:
@@ -271,14 +342,12 @@ def draw_answer_highlight(frame, bbox, answer_number):
 
     corner_len = min(20, (xmax - xmin) // 4, (ymax - ymin) // 4)
     thickness = 4
-    cv2.line(frame, (xmin, ymin), (xmin + corner_len, ymin), (255, 255, 255), thickness)
-    cv2.line(frame, (xmin, ymin), (xmin, ymin + corner_len), (255, 255, 255), thickness)
-    cv2.line(frame, (xmax, ymin), (xmax - corner_len, ymin), (255, 255, 255), thickness)
-    cv2.line(frame, (xmax, ymin), (xmax, ymin + corner_len), (255, 255, 255), thickness)
-    cv2.line(frame, (xmin, ymax), (xmin + corner_len, ymax), (255, 255, 255), thickness)
-    cv2.line(frame, (xmin, ymax), (xmin, ymax - corner_len), (255, 255, 255), thickness)
-    cv2.line(frame, (xmax, ymax), (xmax - corner_len, ymax), (255, 255, 255), thickness)
-    cv2.line(frame, (xmax, ymax), (xmax, ymax - corner_len), (255, 255, 255), thickness)
+    for (cx, cy), (dx, dy) in [
+        ((xmin, ymin), (1, 1)), ((xmax, ymin), (-1, 1)),
+        ((xmin, ymax), (1, -1)), ((xmax, ymax), (-1, -1)),
+    ]:
+        cv2.line(frame, (cx, cy), (cx + dx * corner_len, cy), (255, 255, 255), thickness)
+        cv2.line(frame, (cx, cy), (cx, cy + dy * corner_len), (255, 255, 255), thickness)
 
     badge_text = f"Answer: {answer_number}"
     text_size, baseline = cv2.getTextSize(badge_text, FONT, 0.8, 2)
@@ -291,9 +360,6 @@ def draw_answer_highlight(frame, bbox, answer_number):
                 FONT, 0.8, (0, 0, 0), 2, cv2.LINE_AA)
 
 
-# ============================================================
-# YOLO 탐지 결과 그리기
-# ============================================================
 def draw_detections(frame, result, names, answer_cls=None):
     for box in result.boxes:
         cls_id = int(box.cls[0])
@@ -306,22 +372,19 @@ def draw_detections(frame, result, names, answer_cls=None):
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, line_w)
         text_size, baseline = cv2.getTextSize(text, FONT, 0.5, 1)
         tw, th = text_size
-        label_y1 = max(0, y1 - th - baseline - 4)
-        label_y2 = label_y1 + th + baseline + 4
-        label_x2 = min(frame.shape[1] - 1, x1 + tw + 6)
-        cv2.rectangle(frame, (x1, label_y1), (label_x2, label_y2), color, -1)
-        cv2.putText(frame, text, (x1 + 3, label_y2 - baseline - 2),
+        ly1 = max(0, y1 - th - baseline - 4)
+        ly2 = ly1 + th + baseline + 4
+        lx2 = min(frame.shape[1] - 1, x1 + tw + 6)
+        cv2.rectangle(frame, (x1, ly1), (lx2, ly2), color, -1)
+        cv2.putText(frame, text, (x1 + 3, ly2 - baseline - 2),
                     FONT, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
 
-# ============================================================
-# HUD / 상태 표시 함수들
-# ============================================================
 def draw_status_panel(frame, camera_id, fps, num_detections, conf_thr):
     lines = [
         f"Camera: {camera_id} | FPS: {fps:.1f} | conf >= {conf_thr:.2f}",
         f"Detections: {num_detections} | LLM: Gemma4 (local)",
-        "Spacebar: Solve | q: Quit",
+        "Auto-detect ON | q: Quit",
     ]
     width = max(cv2.getTextSize(l, FONT, 0.55, 1)[0][0] for l in lines) + 24
     height = 24 + len(lines) * 24
@@ -334,29 +397,63 @@ def draw_status_panel(frame, camera_id, fps, num_detections, conf_thr):
         y += 24
 
 
-def draw_processing_indicator(frame):
-    dots = int(time.time() * 2) % 4
-    display_text = "Gemma4 thinking" + "." * dots
-    text_size, baseline = cv2.getTextSize(display_text, FONT, 0.8, 2)
-    tw, th = text_size
-    h, w = frame.shape[:2]
-    px, py = w - tw - 30, 40
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (px - 12, py - th - 8), (px + tw + 12, py + baseline + 8), (0, 80, 200), -1)
-    cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
-    cv2.putText(frame, display_text, (px, py), FONT, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+def draw_phase_banner(frame, ds):
+    """화면 우상단에 현재 단계를 큰 배너로 표시합니다."""
+    phase = ds["phase"]
 
+    if phase == PHASE_IDLE:
+        return  # 대기 상태에서는 배너 없음
 
-def draw_error_message(frame, message):
-    text = f"Error: {message}"
-    text_size, baseline = cv2.getTextSize(text, FONT, 0.6, 1)
-    tw, th = text_size
+    # 단계별 텍스트/색상 설정
+    if phase == PHASE_DETECTING:
+        opts = ds["detected_options"]
+        count = len(opts)
+        progress = ds["stable_count"]
+        text = f"Problem detected ({count}/5 options) ..."
+        bg_color = (200, 140, 0)   # 주황
+    elif phase == PHASE_INFERRING:
+        dots = int(time.time() * 2) % 4
+        text = "Gemma4 solving" + "." * dots
+        bg_color = (200, 80, 0)    # 파랑 계열
+    elif phase == PHASE_ANSWERED:
+        ans = ds["answer_number"]
+        text = f"Answer: {ans}"
+        bg_color = (0, 180, 80)    # 초록
+    elif phase == PHASE_ERROR:
+        text = f"Error: {ds['error_message'] or 'unknown'}"
+        bg_color = (0, 0, 200)     # 빨강
+    else:
+        return
+
     h, w = frame.shape[:2]
-    px, py = w - tw - 30, 40
+    text_size, baseline = cv2.getTextSize(text, FONT, 1.0, 2)
+    tw, th = text_size
+
+    # 우상단 배너
+    px = w - tw - 40
+    py = 50
+    pad = 14
+
     overlay = frame.copy()
-    cv2.rectangle(overlay, (px - 12, py - th - 8), (px + tw + 12, py + baseline + 8), (0, 0, 180), -1)
-    cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
-    cv2.putText(frame, text, (px, py), FONT, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.rectangle(overlay,
+                  (px - pad, py - th - pad),
+                  (px + tw + pad, py + baseline + pad),
+                  bg_color, -1)
+    cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+
+    cv2.putText(frame, text, (px, py), FONT, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
+
+    # DETECTING 단계에서 프로그레스 바 표시
+    if phase == PHASE_DETECTING:
+        bar_x1 = px - pad
+        bar_y1 = py + baseline + pad + 4
+        bar_x2 = px + tw + pad
+        bar_h = 8
+        progress_ratio = min(1.0, ds["stable_count"] / STABLE_FRAMES_REQUIRED)
+        fill_x2 = int(bar_x1 + (bar_x2 - bar_x1) * progress_ratio)
+
+        cv2.rectangle(frame, (bar_x1, bar_y1), (bar_x2, bar_y1 + bar_h), (60, 60, 60), -1)
+        cv2.rectangle(frame, (bar_x1, bar_y1), (fill_x2, bar_y1 + bar_h), (0, 220, 255), -1)
 
 
 def draw_guideline(frame):
@@ -370,13 +467,14 @@ def draw_guideline(frame):
 # 메인 루프
 # ============================================================
 def main():
-    global GEMMA_MODEL
+    global GEMMA_MODEL, MIN_OPTIONS_TO_TRIGGER, AUTO_COOLDOWN
     args = parse_args()
     GEMMA_MODEL = args.llm
+    MIN_OPTIONS_TO_TRIGGER = args.min_options
+    AUTO_COOLDOWN = args.cooldown
 
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         os.environ["DISPLAY"] = ":0"
-        print("ℹ️  DISPLAY 환경변수 없음 → :0 으로 자동 설정")
     os.environ.setdefault("QT_LOGGING_RULES", "*.debug=false;qt.qpa.*=false")
 
     # --- Ollama 연결 확인 ---
@@ -400,7 +498,6 @@ def main():
 
     print(f"YOLO 모델 로딩 중: {model_path}")
     model = YOLO(str(model_path))
-    print(f"모델 라벨: {model.names}")
 
     # --- 카메라 열기 ---
     camera_id, cap, first_frame = open_camera(args.camera, args.width, args.height, args.fps)
@@ -411,21 +508,22 @@ def main():
     actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"카메라 연결 성공: {camera_id} ({actual_w}x{actual_h})")
 
-    # --- Worker Thread 시작 ---
+    # --- Worker Thread ---
     state = SharedState()
     stop_event = threading.Event()
-    worker = threading.Thread(target=gemma_worker, args=(state, stop_event), daemon=True, name="GemmaWorker")
+    worker = threading.Thread(target=gemma_worker, args=(state, stop_event),
+                              daemon=True, name="GemmaWorker")
     worker.start()
-    print("Gemma 4 Worker Thread 시작 (로컬 온디바이스)")
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WINDOW_NAME, min(actual_w, 1280), min(actual_h, 720))
 
-    print("=" * 50)
-    print("시스템 준비 완료! (완전 오프라인 동작)")
-    print("  Spacebar : 문제 풀기 (Gemma 4 로컬 추론)")
-    print("  q        : 종료")
-    print("=" * 50)
+    print("=" * 55)
+    print("시스템 준비 완료! (완전 오프라인, 자동 인식 모드)")
+    print(f"  자동 추론: 선지 {MIN_OPTIONS_TO_TRIGGER}개 이상 탐지 시")
+    print(f"  쿨다운:    {AUTO_COOLDOWN}초")
+    print("  q : 종료")
+    print("=" * 55)
 
     processed = 0
     frame = first_frame
@@ -438,14 +536,26 @@ def main():
                 if not ret:
                     break
 
+            # --- YOLOv11 추론 ---
             results = model.predict(frame, imgsz=args.imgsz, conf=args.conf, verbose=False)
             result = results[0]
             processed += 1
             elapsed = time.perf_counter() - start_time
             live_fps = processed / elapsed if elapsed > 0 else 0.0
 
-            current_state = state.get_state()
-            answer_number = current_state["answer_number"]
+            # --- 자동 문제 인식 ---
+            detected_classes = get_detected_classes(result)
+            should_infer = state.update_detection(detected_classes)
+
+            if should_infer:
+                success = state.request_inference(frame)
+                if success:
+                    print(f"🔍 문제 자동 인식 → Gemma 4 추론 시작 "
+                          f"(탐지된 선지: {len(detected_classes)}개)")
+
+            # --- 화면 표시 ---
+            ds = state.get_display_state()
+            answer_number = ds["answer_number"]
             answer_cls = OPTION_TO_CLASS.get(answer_number) if answer_number else None
 
             display = frame.copy()
@@ -457,25 +567,16 @@ def main():
 
             draw_guideline(display)
             draw_status_panel(display, camera_id, live_fps, len(result.boxes), args.conf)
-
-            if current_state["is_processing"]:
-                draw_processing_indicator(display)
-            if current_state["error_message"]:
-                draw_error_message(display, current_state["error_message"])
+            draw_phase_banner(display, ds)
 
             cv2.imshow(WINDOW_NAME, display)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
-            elif key == 32:
-                success = state.request_capture(frame)
-                if success:
-                    print("📸 프레임 캡처 → Gemma 4 로컬 추론 중...")
-                else:
-                    print("⏳ 이미 처리 중입니다.")
 
             frame = None
+
     finally:
         stop_event.set()
         worker.join(timeout=3.0)

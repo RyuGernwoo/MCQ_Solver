@@ -13,20 +13,21 @@
 ### 핵심 아키텍처
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Main Thread                           │
-│  카메라 프레임 읽기 → YOLOv11 추론 → 화면 렌더링 (30fps) │
-│        │                                                  │
-│        │ [Spacebar]                                       │
-│        ▼                                                  │
-│  ┌──────────────────────────────────┐                     │
-│  │        Worker Thread             │                     │
-│  │  프레임 → Gemma 4 (로컬) → 정답   │                     │
-│  └──────────────────────────────────┘                     │
-│        │                                                  │
-│        ▼                                                  │
-│  정답 번호 + YOLOv11 BBox 매칭 → Alpha Blending 하이라이트│
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    Main Thread                            │
+│  카메라 → YOLOv11 탐지 → 선지 3개+ 감지 → 자동 추론 요청  │
+│        │                                                   │
+│        │ [자동 트리거: 연속 10프레임 안정 탐지]              │
+│        ▼                                                   │
+│  ┌───────────────────────────────────┐                      │
+│  │        Worker Thread              │                      │
+│  │  프레임 → Gemma 4 (로컬) → 정답    │                      │
+│  └───────────────────────────────────┘                      │
+│        │                                                   │
+│        ▼                                                   │
+│  실시간 상태 표시 + 정답 하이라이트                          │
+│  [문제 인식 중] → [추론 중] → [정답: N번]                   │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -113,7 +114,8 @@ ollama serve &
 python main_app.py
 ```
 
-- `Spacebar` : 현재 프레임을 Gemma 4 로컬 모델로 분석
+- 카메라에 수학 문제를 비추면 **자동으로 인식 및 풀이**가 시작됩니다
+- 화면에 실시간 상태가 표시됩니다: `문제 인식 중` → `추론 중` → `정답: N번`
 - `q` : 프로그램 종료
 
 #### 옵션
@@ -121,7 +123,9 @@ python main_app.py
 ```bash
 python main_app.py --camera /dev/video1
 python main_app.py --model runs/option_detect/weights/best.engine
-python main_app.py --llm gemma4:latest    # Ollama 모델명 지정
+python main_app.py --llm gemma4:latest       # Ollama 모델명 지정
+python main_app.py --min-options 3            # 자동 추론 최소 선지 탐지 수
+python main_app.py --cooldown 15             # 재추론 쿨다운 (초)
 python main_app.py --conf 0.4
 ```
 
@@ -133,14 +137,17 @@ python main_app.py --conf 0.4
 - 'On-Device.yolov11' 데이터셋 (151장) 기반 학습
 - 5개 클래스: `opt_1`~`opt_5`
 
-### Gemma 4 로컬 추론 ✅
+### Gemma 4 로컬 추론 + 자동 인식 ✅
 - Ollama를 통한 Gemma 4 (8B, Q4_K_M) 비전 모델 로컬 구동
-- 이미지 입력 → 수학 문제 풀이 → 정답 번호 반환
+- **자동 문제 인식**: YOLOv11이 선지 3개 이상을 안정적으로 탐지하면 자동 추론
+- Phase 기반 상태 머신: `IDLE` → `DETECTING` → `INFERRING` → `ANSWERED`
+- 실시간 상태 배너 표시 (프로그레스 바 포함)
 - **완전 오프라인 동작** (인터넷 불필요)
 
 ### 정답 시각화 ✅
 - 정답 번호 ↔ YOLOv11 BBox 매칭
 - Alpha Blending 하이라이트 + 뱃지 오버레이
+- 추론 단계별 실시간 상태 메시지 표시
 
 ### TensorRT 최적화 ✅
 - `export_tensorrt.py`로 YOLOv11 추론 가속
