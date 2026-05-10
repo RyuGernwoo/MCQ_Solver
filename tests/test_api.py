@@ -22,9 +22,12 @@ def test_gemma_math_solver(image_path):
     print(f"[{image_path}] 분석 시작... (Gemma 4 로컬 추론 중)")
 
     prompt = (
-        "You are a Korean CSAT math expert. "
-        "Solve the math problem in the attached image logically. "
-        "Return ONLY the answer number (one of 1, 2, 3, 4, 5) as JSON: {\"answer\": N}"
+        "You are an expert at solving multiple-choice questions across all academic subjects "
+        "including mathematics, science, literature, social studies, and more. "
+        "Carefully read the question and all options shown in the image. "
+        "Apply logical reasoning and domain knowledge to determine the correct answer. "
+        "Return ONLY a JSON object with the answer number: {\"answer\": N} "
+        "where N is one of 1, 2, 3, 4, or 5. Do not include any explanation."
     )
 
     try:

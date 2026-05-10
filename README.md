@@ -1,33 +1,45 @@
-# 수능 수학 객관식 자동 정답 표시 시스템 (온디바이스)
+# 객관식 자동 정답 표시 시스템 (On-Device MCQ Solver)
 
-> Jetson Orin Nano + oCam-5CRO-U + Gemma 4 (로컬) 기반  
-> 수능 수학 객관식 문제를 카메라로 촬영하면 정답 번호를 실시간으로 표시하는 **완전 오프라인** 임베디드 AI 시스템
+> **Jetson Orin Nano + oCam-5CRO-U + YOLOv11 + Gemma 4 (로컬)**  
+> 카메라로 객관식 문제를 촬영하면 **수학·과학·언어·사회 등 어떤 분야든** 자동으로 정답을 탐지하여 실시간으로 표시하는 완전 오프라인 온디바이스 AI 시스템
 
 ---
 
 ## 📌 프로젝트 개요
 
-카메라로 수능 수학 객관식 문제를 촬영하면, **YOLOv11이 선지 영역(①~⑤)을 실시간 탐지**하고 **Gemma 4가 로컬에서 문제를 풀어 정답 번호를 반환**합니다.  
-인터넷 연결 없이 완전 오프라인으로 동작하는 온디바이스 AI 시스템입니다.
+카메라로 객관식 문제를 촬영하면:
 
-### 핵심 아키텍처
+1. **YOLOv11**이 선지(①~⑤)를 실시간으로 탐지
+2. 선지가 안정적으로 감지되면 **자동으로** Gemma 4 로컬 추론 시작
+3. **Gemma 4**가 문제를 풀어 정답 번호를 반환
+4. 정답 선지에 **반투명 형광펜 하이라이트** 오버레이
+
+인터넷 연결·API 키 없이 **완전 오프라인**으로 동작합니다.
+
+---
+
+## 🔄 자동 인식 흐름
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    Main Thread                            │
-│  카메라 → YOLOv11 탐지 → 선지 3개+ 감지 → 자동 추론 요청  │
-│        │                                                   │
-│        │ [자동 트리거: 연속 10프레임 안정 탐지]              │
-│        ▼                                                   │
-│  ┌───────────────────────────────────┐                      │
-│  │        Worker Thread              │                      │
-│  │  프레임 → Gemma 4 (로컬) → 정답    │                      │
-│  └───────────────────────────────────┘                      │
-│        │                                                   │
-│        ▼                                                   │
-│  실시간 상태 표시 + 정답 하이라이트                          │
-│  [문제 인식 중] → [추론 중] → [정답: N번]                   │
-└──────────────────────────────────────────────────────────┘
+카메라 프레임
+    │
+    ▼
+YOLOv11 선지 탐지 (30fps)
+    │
+    │ 선지 3개 이상 × 연속 10프레임 안정 감지
+    ▼
+┌─────────────────────────────────────────────┐
+│ 화면 상태 배너 (우상단 실시간 표시)           │
+│                                             │
+│  [문제 인식 중] → [Gemma4 solving...] →     │
+│  [Answer: N]                                │
+└─────────────────────────────────────────────┘
+    │
+    ▼
+Gemma 4 Worker Thread (로컬 비전 추론)
+    │
+    ▼
+정답 선지 Alpha Blending 하이라이트
 ```
 
 ---
@@ -35,20 +47,22 @@
 ## 🛠️ 시스템 구성
 
 ### 하드웨어
+
 | 항목 | 사양 |
 |---|---|
 | 엣지 컴퓨팅 보드 | NVIDIA Jetson Orin Nano |
 | 카메라 | Withrobot oCam-5CRO-U (글로벌 셔터 / USB 3.0) |
-| 카메라 포맷 | YUYV, 1280×720, 30fps (고정) |
+| 카메라 포맷 | YUYV, 1280×720, 30fps |
 
 ### 소프트웨어
+
 | 항목 | 내용 |
 |---|---|
-| 수학 추론 엔진 | **Gemma 4 (Ollama, 로컬 온디바이스)** |
-| 선지 영역 탐지 | YOLOv11n (Ultralytics) / TensorRT 최적화 |
-| LLM 서빙 | Ollama |
-| 영상 처리 | OpenCV (cv2) + Alpha Blending |
+| 선지 탐지 | **YOLOv11n** (Ultralytics, CUDA 가속) |
+| 추론 엔진 | **Gemma 4** (8B, Q4_K_M, Ollama 로컬 서빙) |
+| 영상 처리 | OpenCV + Alpha Blending |
 | 비동기 처리 | Python threading |
+| 언어 | Python 3 |
 
 ---
 
@@ -56,16 +70,23 @@
 
 ```
 jetson_classification/
-├── main_app.py              # ★ 메인 파이프라인 (카메라 + YOLOv11 + Gemma4 + 시각화)
-├── export_tensorrt.py       # YOLOv11 .pt → TensorRT .engine 변환
+│
+├── main_app.py              # ★ 메인 파이프라인 (자동 인식 + YOLOv11 + Gemma 4)
 ├── train_yolo.py            # YOLOv11 선지 탐지 모델 학습
-├── capture_app.py           # 카메라 캡처 및 이미지 저장
+├── export_tensorrt.py       # YOLOv11 .pt → TensorRT .engine 변환
+├── capture_app.py           # 카메라 독립 프리뷰 (선택 사용)
+│
 ├── tests/
 │   ├── test_api.py          #   Gemma 4 단일 이미지 추론 테스트
 │   ├── test_camera_yolo.py  #   카메라 + YOLOv11 실시간 탐지 테스트
-│   └── check_models.py      #   사용 가능한 로컬 모델 목록 확인
-├── runs/                    # YOLOv11 학습 결과물
-├── On-Device.yolov11/       # 원본 라벨 데이터셋 (151장)
+│   └── check_models.py      #   로컬 Ollama 모델 목록 확인
+│
+├── runs/                    # YOLOv11 학습 결과 (자동 생성)
+│   └── option_detect/weights/best.pt
+│
+├── On-Device.yolov11/       # 학습 데이터셋 (Roboflow, 151장)
+├── dataset_bbox/            # 전처리된 학습 데이터 (자동 생성)
+│
 ├── .gitignore
 └── README.md
 ```
@@ -74,19 +95,19 @@ jetson_classification/
 
 ## ⚙️ 환경 설정
 
-### 1. 의존성 설치
+### 1. Python 의존성 설치
 
 ```bash
 pip install opencv-python ultralytics ollama numpy
 ```
 
-### 2. Ollama 설치 및 Gemma 4 모델 다운로드
+### 2. Ollama + Gemma 4 설치
 
 ```bash
-# Ollama 설치 (이미 설치되어 있다면 생략)
+# Ollama 설치
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Gemma 4 모델 다운로드
+# Gemma 4 모델 다운로드 (~9.6 GB)
 ollama pull gemma4:latest
 ```
 
@@ -96,70 +117,126 @@ ollama pull gemma4:latest
 ls /dev/video*
 ```
 
-> ⚠️ API 키나 인터넷 연결은 필요하지 않습니다. 모든 추론이 로컬에서 수행됩니다.
+> API 키·인터넷 연결이 **전혀 필요하지 않습니다.**
 
 ---
 
 ## 🚀 실행 방법
 
-### Ollama 서버 시작 (백그라운드)
+### Ollama 서버 시작 (최초 1회, 백그라운드)
 
 ```bash
 ollama serve &
 ```
 
-### 메인 애플리케이션 실행
+### 메인 실행 (자동 인식 모드)
 
 ```bash
 python main_app.py
 ```
 
-- 카메라에 수학 문제를 비추면 **자동으로 인식 및 풀이**가 시작됩니다
-- 화면에 실시간 상태가 표시됩니다: `문제 인식 중` → `추론 중` → `정답: N번`
-- `q` : 프로그램 종료
+카메라에 객관식 문제지를 비추면 자동으로 분석이 시작됩니다.  
+키 조작: `q` — 종료
 
-#### 옵션
+#### 주요 옵션
+
+| 옵션 | 기본값 | 설명 |
+|---|---|---|
+| `--camera` | auto | 카메라 장치 (`/dev/video0` 등) |
+| `--model` | runs/.../best.pt | YOLOv11 모델 경로 |
+| `--llm` | gemma4:latest | Ollama 모델명 |
+| `--min-options` | 3 | 자동 추론 시작 최소 선지 수 |
+| `--cooldown` | 15 | 재추론까지 쿨다운 (초) |
+| `--conf` | 0.5 | YOLO 탐지 신뢰도 임계값 |
 
 ```bash
-python main_app.py --camera /dev/video1
-python main_app.py --model runs/option_detect/weights/best.engine
-python main_app.py --llm gemma4:latest       # Ollama 모델명 지정
-python main_app.py --min-options 3            # 자동 추론 최소 선지 탐지 수
-python main_app.py --cooldown 15             # 재추론 쿨다운 (초)
-python main_app.py --conf 0.4
+# 예시
+python main_app.py --camera /dev/video1 --min-options 4 --cooldown 20
+python main_app.py --model runs/option_detect/weights/best.engine  # TensorRT
+```
+
+### 단일 이미지 테스트
+
+```bash
+python tests/test_api.py path/to/question.jpg
+```
+
+### 로컬 모델 목록 확인
+
+```bash
+python tests/check_models.py
+```
+
+### YOLOv11 모델 학습
+
+```bash
+python train_yolo.py
+```
+
+### TensorRT 변환 (추론 가속)
+
+```bash
+python export_tensorrt.py
 ```
 
 ---
 
 ## 🔧 구현 상세
 
-### YOLOv11 선지 영역 탐지 ✅
-- 'On-Device.yolov11' 데이터셋 (151장) 기반 학습
-- 5개 클래스: `opt_1`~`opt_5`
+### 자동 문제 인식 (Phase 기반 상태 머신)
 
-### Gemma 4 로컬 추론 + 자동 인식 ✅
-- Ollama를 통한 Gemma 4 (8B, Q4_K_M) 비전 모델 로컬 구동
-- **자동 문제 인식**: YOLOv11이 선지 3개 이상을 안정적으로 탐지하면 자동 추론
-- Phase 기반 상태 머신: `IDLE` → `DETECTING` → `INFERRING` → `ANSWERED`
-- 실시간 상태 배너 표시 (프로그레스 바 포함)
-- **완전 오프라인 동작** (인터넷 불필요)
+| Phase | 조건 | 화면 배너 |
+|---|---|---|
+| `IDLE` | 대기 중 | — |
+| `DETECTING` | 선지 3개+ 감지 중 | 🟠 `문제 인식 중 (N/5 options)` + 프로그레스 바 |
+| `INFERRING` | Gemma 4 추론 중 | 🔵 `Gemma4 solving...` |
+| `ANSWERED` | 정답 확정 | 🟢 `Answer: N` |
+| `ERROR` | 오류 발생 | 🔴 `Error: ...` |
 
-### 정답 시각화 ✅
-- 정답 번호 ↔ YOLOv11 BBox 매칭
-- Alpha Blending 하이라이트 + 뱃지 오버레이
-- 추론 단계별 실시간 상태 메시지 표시
+- **안정화 조건**: 선지 3개 이상을 **연속 10 프레임** 탐지 시 추론 시작
+- **쿨다운**: 추론 완료 후 15초간 재추론 방지 (재촬영 시 리셋)
 
-### TensorRT 최적화 ✅
-- `export_tensorrt.py`로 YOLOv11 추론 가속
+### 범용 프롬프트 엔지니어링
+
+Gemma 4에 전달되는 프롬프트는 **수학에 국한되지 않고 모든 분야**를 처리합니다:
+
+```
+You are an expert at solving multiple-choice questions across all academic
+subjects including mathematics, science, literature, social studies, and more.
+Carefully read the question and all options shown in the image.
+Apply logical reasoning and domain knowledge to determine the correct answer.
+Return ONLY a JSON object with the answer number: {"answer": N}
+where N is one of 1, 2, 3, 4, or 5. Do not include any explanation.
+```
+
+### YOLOv11 선지 탐지 모델
+
+- 데이터셋: `On-Device.yolov11` (151장, Roboflow)
+- 학습 결과: **mAP50 = 0.886**, mAP50-95 = 0.480
+- 클래스: `opt_1`(①) ~ `opt_5`(⑤)
+- 모델: YOLOv11n (2.58M params, 6.3 GFLOPs)
+
+---
+
+## 📊 성능
+
+| 항목 | 수치 |
+|---|---|
+| YOLOv11 탐지 FPS | ~14 fps (Jetson Orin Nano, CPU) |
+| YOLOv11 mAP50 | 0.886 |
+| Gemma 4 추론 시간 | 30~120초 (8B Q4, Jetson GPU) |
+| 전체 메모리 사용 | ~10 GB (Gemma 4 모델 포함) |
+
+> TensorRT 변환 시 YOLOv11 추론 속도가 크게 향상됩니다.
 
 ---
 
 ## 📝 참고 사항
 
-- **인터넷 연결 불필요**: 모든 AI 추론(YOLOv11 + Gemma 4)이 Jetson에서 로컬 수행됩니다.
+- **완전 오프라인 동작**: 모든 AI 추론(YOLOv11 + Gemma 4)이 Jetson 로컬에서 수행됩니다.
 - Ollama 서버가 백그라운드에서 실행 중이어야 합니다 (`ollama serve`).
-- Gemma 4 모델은 약 9.6GB 디스크 공간을 사용합니다.
-- TensorRT `.engine` 파일은 빌드한 GPU 아키텍처에 종속됩니다.
+- Gemma 4 모델은 약 9.6 GB 디스크 공간을 사용합니다.
+- TensorRT `.engine` 파일은 빌드한 GPU 아키텍처에 종속됩니다 (Jetson ↔ PC 간 호환 불가).
 
 ---
 

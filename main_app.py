@@ -1,5 +1,5 @@
 """
-수능 수학 객관식 자동 정답 표시 시스템 — 메인 애플리케이션 (온디바이스)
+객관식 자동 정답 표시 시스템 — 메인 애플리케이션 (온디바이스)
 
 기능:
   - Main Thread: 카메라 프레임 → YOLOv11 실시간 추론 → 자동 문제 인식 → 화면 출력
@@ -9,6 +9,7 @@
 자동 동작:
   YOLOv11이 선지를 3개 이상 탐지하면 자동으로 Gemma 4 추론을 시작합니다.
   '문제 인식 중' → '추론 중' → '정답: N번' 상태가 화면에 실시간 표시됩니다.
+  수학·과학·언어·사회 등 어떤 분야의 객관식 문제도 처리합니다.
 
 키 조작:
   q : 프로그램 종료
@@ -33,7 +34,7 @@ from ultralytics import YOLO
 # ============================================================
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_MODEL = PROJECT_DIR / "runs" / "option_detect" / "weights" / "best.pt"
-WINDOW_NAME = "Math Solver — Jetson (On-Device)"
+WINDOW_NAME = "Auto MCQ Solver — Jetson (On-Device)"
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 GEMMA_MODEL = "gemma4:latest"
@@ -195,9 +196,12 @@ def gemma_worker(state: SharedState, stop_event: threading.Event):
             image_bytes = jpeg_buf.tobytes()
 
             prompt = (
-                "You are a Korean CSAT math expert. "
-                "Solve the math problem in the attached image logically. "
-                "Return ONLY the answer number (one of 1, 2, 3, 4, 5) as JSON: {\"answer\": N}"
+                "You are an expert at solving multiple-choice questions across all academic subjects "
+                "including mathematics, science, literature, social studies, and more. "
+                "Carefully read the question and all options shown in the image. "
+                "Apply logical reasoning and domain knowledge to determine the correct answer. "
+                "Return ONLY a JSON object with the answer number: {\"answer\": N} "
+                "where N is one of 1, 2, 3, 4, or 5. Do not include any explanation."
             )
 
             response = ollama.chat(
