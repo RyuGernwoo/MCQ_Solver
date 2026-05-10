@@ -1,6 +1,3 @@
-# API Keys / Secrets
-.env
-
 # Captured images (large binary files)
 captured_images/
 

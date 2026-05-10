@@ -1,20 +1,16 @@
-import os
-from dotenv import load_dotenv
-from google import genai
+"""Ollama에서 사용 가능한 로컬 모델 목록을 확인합니다."""
 
-# .env 파일에서 API 키 로드
-load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY")
+import ollama
 
-if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
-
-client = genai.Client(api_key=API_KEY)
-
-print("사용 가능한 모델 목록:")
+print("사용 가능한 로컬 모델 목록:")
 try:
-    # 필터링 없이 접근 가능한 모든 모델 출력
-    for model in client.models.list():
-        print(f"- {model.name}")
+    result = ollama.list()
+    models = result.models if hasattr(result, 'models') else result.get("models", [])
+    for m in models:
+        name = m.model if hasattr(m, 'model') else m.get("model", m.get("name", "unknown"))
+        size = m.size if hasattr(m, 'size') else m.get("size", 0)
+        size_gb = size / (1024**3) if size else 0
+        print(f"  - {name} ({size_gb:.1f} GB)")
 except Exception as e:
-    print(f"❌ 목록을 불러오는 중 에러 발생: {e}")
+    print(f"❌ Ollama 서버에 연결할 수 없습니다: {e}")
+    print("   'ollama serve' 명령으로 서버를 시작하세요.")
