@@ -1,4 +1,9 @@
-# 객관식 자동 정답 표시 시스템 (On-Device MCQ Solver)
+# MCQ Solver
+
+---
+
+## 객관식 자동 정답 표시 시스템
+## On-Device MCQ Solver (with Jetson Orin Nano)
 
 > **Jetson Orin Nano + oCam-5CRO-U + YOLOv11 + Gemma 3 4B (로컬)**  
 > 카메라로 객관식 문제를 촬영하면 **수학·과학·언어·사회 등 어떤 분야든** 자동으로 정답을 탐지하여 실시간으로 표시하는 완전 오프라인 온디바이스 AI 시스템
@@ -15,6 +20,11 @@
 4. 정답 선지에 **반투명 형광펜 하이라이트** 오버레이
 
 인터넷 연결·API 키 없이 **완전 오프라인**으로 동작합니다.
+
+---
+
+## 🎥 실행 영상
+[실행 영상](https://www.youtube.com/shorts/-OuzQPkOn68?si=i5MJgcjgLY__kkfz&themeRefresh=1)
 
 ---
 
@@ -150,18 +160,6 @@ python main_app.py --camera /dev/video1 --min-options 4 --cooldown 20
 python main_app.py --model runs/option_detect/weights/best.engine  # TensorRT
 ```
 
-### 단일 이미지 테스트
-
-```bash
-python tests/test_api.py path/to/question.jpg
-```
-
-### 로컬 모델 목록 확인
-
-```bash
-python tests/check_models.py
-```
-
 ### YOLOv11 모델 학습
 
 ```bash
@@ -193,7 +191,7 @@ python export_tensorrt.py
 
 ### 범용 프롬프트 엔지니어링
 
-Gemma 3에 전달되는 프롬프트는 **수학에 국한되지 않고 모든 분야**를 처리합니다:
+Gemma 3에 전달되는 프롬프트는 **모든 분야**를 처리합니다:
 
 ```
 You are an expert at solving multiple-choice questions across all academic
@@ -233,6 +231,12 @@ where N is one of 1, 2, 3, 4, or 5. Do not include any explanation.
 - Ollama 서버가 백그라운드에서 실행 중이어야 합니다 (`ollama serve`).
 - Gemma 3 4B 모델은 약 3.3 GB 디스크 공간을 사용합니다.
 - TensorRT `.engine` 파일은 빌드한 GPU 아키텍처에 종속됩니다 (Jetson ↔ PC 간 호환 불가).
+
+---
+
+## 📚 데이터셋
+- 활용 데이터셋 : [EBS 모의고사][text](https://www.ebsi.co.kr/ebs/xip/xipa/retrieveSCVPreparation.ebs?irecord=202605073&targetCd=D300&cookieGradeVal=high3)
+- 라벨링 데이터셋 : [MCQ Dataset](https://app.roboflow.com/zs-workspace-sdslq/mcq_solver/models)
 
 ---
 
