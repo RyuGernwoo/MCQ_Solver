@@ -1,7 +1,7 @@
 """
-Gemma 4 로컬 추론 테스트 — 단일 이미지 수학 문제 풀이
+Gemma 3 로컬 추론 테스트 — 단일 이미지 수학 문제 풀이
 
-Ollama를 통해 Gemma 4 모델에 이미지를 전달하고 정답을 추론합니다.
+Ollama를 통해 Gemma 3 모델에 이미지를 전달하고 정답을 추론합니다.
 인터넷 연결 없이 완전 로컬에서 동작합니다.
 
 사용법:
@@ -19,7 +19,7 @@ def test_gemma_math_solver(image_path):
         print(f"❌ 이미지 파일이 없습니다: {image_path}")
         return
 
-    print(f"[{image_path}] 분석 시작... (Gemma 4 로컬 추론 중)")
+    print(f"[{image_path}] 분석 시작... (Gemma 3 로컬 추론 중)")
 
     prompt = (
         "You are an expert at solving multiple-choice questions across all academic subjects "
@@ -32,7 +32,7 @@ def test_gemma_math_solver(image_path):
 
     try:
         response = ollama.chat(
-            model="gemma4:latest",
+            model="gemma3:4b",
             messages=[{
                 "role": "user",
                 "content": prompt,

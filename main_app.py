@@ -3,11 +3,11 @@
 
 기능:
   - Main Thread: 카메라 프레임 → YOLOv11 실시간 추론 → 자동 문제 인식 → 화면 출력
-  - Worker Thread: 문제 감지 시 자동으로 Gemma 4 로컬 추론 → 정답 반환
+  - Worker Thread: 문제 감지 시 자동으로 Gemma 3 로컬 추론 → 정답 반환
   - 정답 번호 + YOLOv11 Bounding Box 매칭 → Alpha Blending 하이라이트
 
 자동 동작:
-  YOLOv11이 선지를 3개 이상 탐지하면 자동으로 Gemma 4 추론을 시작합니다.
+  YOLOv11이 선지를 3개 이상 탐지하면 자동으로 Gemma 3 추론을 시작합니다.
   '문제 인식 중' → '추론 중' → '정답: N번' 상태가 화면에 실시간 표시됩니다.
   수학·과학·언어·사회 등 어떤 분야의 객관식 문제도 처리합니다.
 
@@ -37,7 +37,7 @@ DEFAULT_MODEL = PROJECT_DIR / "runs" / "option_detect" / "weights" / "best.pt"
 WINDOW_NAME = "Auto MCQ Solver — Jetson (On-Device)"
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
-GEMMA_MODEL = "gemma4:latest"
+GEMMA_MODEL = "gemma3:4b"
 
 # YOLOv11 클래스 인덱스 → 선지 번호 매핑
 CLASS_TO_OPTION = {0: 1, 1: 2, 2: 3, 3: 4, 4: 5}
@@ -179,7 +179,7 @@ class SharedState:
 
 
 # ============================================================
-# Worker Thread: Gemma 4 로컬 추론
+# Worker Thread: Gemma 3 로컬 추론
 # ============================================================
 def gemma_worker(state: SharedState, stop_event: threading.Event):
     while not stop_event.is_set():
@@ -214,7 +214,7 @@ def gemma_worker(state: SharedState, stop_event: threading.Event):
             )
 
             raw_text = response["message"]["content"].strip()
-            print(f"🤖 Gemma 4 응답: {raw_text}")
+            print(f"🤖 Gemma 3 응답: {raw_text}")
 
             answer = None
             json_match = re.search(r'\{[^}]*"answer"\s*:\s*(\d+)[^}]*\}', raw_text)
@@ -226,13 +226,13 @@ def gemma_worker(state: SharedState, stop_event: threading.Event):
                     answer = int(num_match.group())
 
             if answer in (1, 2, 3, 4, 5):
-                print(f"✅ Gemma 4 정답: {answer}번")
+                print(f"✅ Gemma 3 정답: {answer}번")
                 state.set_answer(answer)
             else:
                 state.set_error(f"유효하지 않은 응답")
 
         except Exception as e:
-            print(f"❌ Gemma 4 추론 에러: {e}")
+            print(f"❌ Gemma 3 추론 에러: {e}")
             state.set_error(str(e)[:40])
 
 
@@ -241,12 +241,12 @@ def gemma_worker(state: SharedState, stop_event: threading.Event):
 # ============================================================
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="수능 수학 객관식 자동 정답 표시 시스템 (온디바이스, 자동 인식)"
+        description="객관식 자동 정답 표시 시스템 (온디바이스, 자동 인식)"
     )
     parser.add_argument("--model", default=str(DEFAULT_MODEL), help="YOLO 모델 경로")
     parser.add_argument("--camera", default="auto", help="카메라 장치")
-    parser.add_argument("--imgsz", type=int, default=480, help="YOLO 추론 이미지 크기")
-    parser.add_argument("--conf", type=float, default=0.5, help="탐지 신뢰도 임계값")
+    parser.add_argument("--imgsz", type=int, default=640, help="YOLO 추론 이미지 크기")
+    parser.add_argument("--conf", type=float, default=0.35, help="탐지 신뢰도 임계값")
     parser.add_argument("--width", type=int, default=1280, help="카메라 너비")
     parser.add_argument("--height", type=int, default=720, help="카메라 높이")
     parser.add_argument("--fps", type=int, default=30, help="카메라 FPS")
@@ -291,6 +291,31 @@ def open_camera(camera_arg, width, height, fps):
         cap.release()
         time.sleep(0.3)
     return None, None, None
+
+
+# ============================================================
+# 이미지 전처리 (카메라 → YOLO 입력 최적화)
+# ============================================================
+def preprocess_frame(frame):
+    """
+    카메라 원본 프레임에 CLAHE 대비 향상 + 샤프닝을 적용하여
+    YOLO 탐지 성능을 개선합니다. 원본 프레임은 변경하지 않습니다.
+    """
+    enhanced = frame.copy()
+
+    # 1) CLAHE 대비 향상 (LAB 색공간에서 L 채널에 적용)
+    lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_ch = clahe.apply(l_ch)
+    enhanced = cv2.merge([l_ch, a_ch, b_ch])
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+    # 2) 언샤프 마스크 (경량 샤프닝)
+    blurred = cv2.GaussianBlur(enhanced, (0, 0), 2.0)
+    enhanced = cv2.addWeighted(enhanced, 1.5, blurred, -0.5, 0)
+
+    return enhanced
 
 
 # ============================================================
@@ -387,7 +412,7 @@ def draw_detections(frame, result, names, answer_cls=None):
 def draw_status_panel(frame, camera_id, fps, num_detections, conf_thr):
     lines = [
         f"Camera: {camera_id} | FPS: {fps:.1f} | conf >= {conf_thr:.2f}",
-        f"Detections: {num_detections} | LLM: Gemma4 (local)",
+        f"Detections: {num_detections} | LLM: Gemma3 (local)",
         "Auto-detect ON | q: Quit",
     ]
     width = max(cv2.getTextSize(l, FONT, 0.55, 1)[0][0] for l in lines) + 24
@@ -417,7 +442,7 @@ def draw_phase_banner(frame, ds):
         bg_color = (200, 140, 0)   # 주황
     elif phase == PHASE_INFERRING:
         dots = int(time.time() * 2) % 4
-        text = "Gemma4 solving" + "." * dots
+        text = "Gemma3 solving" + "." * dots
         bg_color = (200, 80, 0)    # 파랑 계열
     elif phase == PHASE_ANSWERED:
         ans = ds["answer_number"]
@@ -540,8 +565,9 @@ def main():
                 if not ret:
                     break
 
-            # --- YOLOv11 추론 ---
-            results = model.predict(frame, imgsz=args.imgsz, conf=args.conf, verbose=False)
+            # --- 프레임 전처리 + YOLOv11 추론 ---
+            enhanced = preprocess_frame(frame)
+            results = model.predict(enhanced, imgsz=args.imgsz, conf=args.conf, verbose=False)
             result = results[0]
             processed += 1
             elapsed = time.perf_counter() - start_time
@@ -554,7 +580,7 @@ def main():
             if should_infer:
                 success = state.request_inference(frame)
                 if success:
-                    print(f"🔍 문제 자동 인식 → Gemma 4 추론 시작 "
+                    print(f"🔍 문제 자동 인식 → LLM 추론 시작 "
                           f"(탐지된 선지: {len(detected_classes)}개)")
 
             # --- 화면 표시 ---

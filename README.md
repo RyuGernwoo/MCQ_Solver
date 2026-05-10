@@ -1,6 +1,6 @@
 # 객관식 자동 정답 표시 시스템 (On-Device MCQ Solver)
 
-> **Jetson Orin Nano + oCam-5CRO-U + YOLOv11 + Gemma 4 (로컬)**  
+> **Jetson Orin Nano + oCam-5CRO-U + YOLOv11 + Gemma 3 4B (로컬)**  
 > 카메라로 객관식 문제를 촬영하면 **수학·과학·언어·사회 등 어떤 분야든** 자동으로 정답을 탐지하여 실시간으로 표시하는 완전 오프라인 온디바이스 AI 시스템
 
 ---
@@ -10,8 +10,8 @@
 카메라로 객관식 문제를 촬영하면:
 
 1. **YOLOv11**이 선지(①~⑤)를 실시간으로 탐지
-2. 선지가 안정적으로 감지되면 **자동으로** Gemma 4 로컬 추론 시작
-3. **Gemma 4**가 문제를 풀어 정답 번호를 반환
+2. 선지가 안정적으로 감지되면 **자동으로** Gemma 3 로컬 추론 시작
+3. **Gemma 3 4B**가 문제를 풀어 정답 번호를 반환
 4. 정답 선지에 **반투명 형광펜 하이라이트** 오버레이
 
 인터넷 연결·API 키 없이 **완전 오프라인**으로 동작합니다.
@@ -36,7 +36,7 @@ YOLOv11 선지 탐지 (30fps)
 └─────────────────────────────────────────────┘
     │
     ▼
-Gemma 4 Worker Thread (로컬 비전 추론)
+Gemma 3 Worker Thread (로컬 비전 추론)
     │
     ▼
 정답 선지 Alpha Blending 하이라이트
@@ -59,7 +59,7 @@ Gemma 4 Worker Thread (로컬 비전 추론)
 | 항목 | 내용 |
 |---|---|
 | 선지 탐지 | **YOLOv11n** (Ultralytics, CUDA 가속) |
-| 추론 엔진 | **Gemma 4** (8B, Q4_K_M, Ollama 로컬 서빙) |
+| 추론 엔진 | **Gemma 3 4B** (Q4_K_M, Ollama 로컬 서빙) |
 | 영상 처리 | OpenCV + Alpha Blending |
 | 비동기 처리 | Python threading |
 | 언어 | Python 3 |
@@ -71,13 +71,13 @@ Gemma 4 Worker Thread (로컬 비전 추론)
 ```
 jetson_classification/
 │
-├── main_app.py              # ★ 메인 파이프라인 (자동 인식 + YOLOv11 + Gemma 4)
+├── main_app.py              # ★ 메인 파이프라인 (자동 인식 + YOLOv11 + Gemma 3 + 전처리)
 ├── train_yolo.py            # YOLOv11 선지 탐지 모델 학습
 ├── export_tensorrt.py       # YOLOv11 .pt → TensorRT .engine 변환
 ├── capture_app.py           # 카메라 독립 프리뷰 (선택 사용)
 │
 ├── tests/
-│   ├── test_api.py          #   Gemma 4 단일 이미지 추론 테스트
+│   ├── test_api.py          #   Gemma 3 단일 이미지 추론 테스트
 │   ├── test_camera_yolo.py  #   카메라 + YOLOv11 실시간 탐지 테스트
 │   └── check_models.py      #   로컬 Ollama 모델 목록 확인
 │
@@ -101,14 +101,14 @@ jetson_classification/
 pip install opencv-python ultralytics ollama numpy
 ```
 
-### 2. Ollama + Gemma 4 설치
+### 2. Ollama + Gemma 3 설치
 
 ```bash
 # Ollama 설치
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Gemma 4 모델 다운로드 (~9.6 GB)
-ollama pull gemma4:latest
+# Gemma 3 4B 모델 다운로드 (~3.3 GB)
+ollama pull gemma3:4b
 ```
 
 ### 3. 카메라 연결 확인
@@ -144,10 +144,10 @@ python main_app.py
 |---|---|---|
 | `--camera` | auto | 카메라 장치 (`/dev/video0` 등) |
 | `--model` | runs/.../best.pt | YOLOv11 모델 경로 |
-| `--llm` | gemma4:latest | Ollama 모델명 |
+| `--llm` | gemma3:4b | Ollama 모델명 |
 | `--min-options` | 3 | 자동 추론 시작 최소 선지 수 |
 | `--cooldown` | 15 | 재추론까지 쿨다운 (초) |
-| `--conf` | 0.5 | YOLO 탐지 신뢰도 임계값 |
+| `--conf` | 0.35 | YOLO 탐지 신뢰도 임계값 |
 
 ```bash
 # 예시
@@ -189,7 +189,7 @@ python export_tensorrt.py
 |---|---|---|
 | `IDLE` | 대기 중 | — |
 | `DETECTING` | 선지 3개+ 감지 중 | 🟠 `문제 인식 중 (N/5 options)` + 프로그레스 바 |
-| `INFERRING` | Gemma 4 추론 중 | 🔵 `Gemma4 solving...` |
+| `INFERRING` | Gemma 3 추론 중 | 🔵 `Gemma3 solving...` |
 | `ANSWERED` | 정답 확정 | 🟢 `Answer: N` |
 | `ERROR` | 오류 발생 | 🔴 `Error: ...` |
 
@@ -198,7 +198,7 @@ python export_tensorrt.py
 
 ### 범용 프롬프트 엔지니어링
 
-Gemma 4에 전달되는 프롬프트는 **수학에 국한되지 않고 모든 분야**를 처리합니다:
+Gemma 3에 전달되는 프롬프트는 **수학에 국한되지 않고 모든 분야**를 처리합니다:
 
 ```
 You are an expert at solving multiple-choice questions across all academic
@@ -224,18 +224,19 @@ where N is one of 1, 2, 3, 4, or 5. Do not include any explanation.
 |---|---|
 | YOLOv11 탐지 FPS | ~14 fps (Jetson Orin Nano, CPU) |
 | YOLOv11 mAP50 | 0.886 |
-| Gemma 4 추론 시간 | 30~120초 (8B Q4, Jetson GPU) |
-| 전체 메모리 사용 | ~10 GB (Gemma 4 모델 포함) |
+| LLM 모델 | Gemma 3 4B (Q4_K_M, 3.3 GB) |
+| LLM 추론 시간 | ~10–30초 (Jetson Orin Nano GPU) |
+| 전체 메모리 사용 | ~5–6 GB |
 
-> TensorRT 변환 시 YOLOv11 추론 속도가 크게 향상됩니다.
+> 전처리 파이프라인 (CLAHE + 샤프닝)으로 카메라 이미지 품질을 개선하여 탐지 성능을 향상시켰습니다.
 
 ---
 
 ## 📝 참고 사항
 
-- **완전 오프라인 동작**: 모든 AI 추론(YOLOv11 + Gemma 4)이 Jetson 로컬에서 수행됩니다.
+- **완전 오프라인 동작**: 모든 AI 추론(YOLOv11 + Gemma 3)이 Jetson 로컬에서 수행됩니다.
 - Ollama 서버가 백그라운드에서 실행 중이어야 합니다 (`ollama serve`).
-- Gemma 4 모델은 약 9.6 GB 디스크 공간을 사용합니다.
+- Gemma 3 4B 모델은 약 3.3 GB 디스크 공간을 사용합니다.
 - TensorRT `.engine` 파일은 빌드한 GPU 아키텍처에 종속됩니다 (Jetson ↔ PC 간 호환 불가).
 
 ---
