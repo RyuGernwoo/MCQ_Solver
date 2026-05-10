@@ -31,7 +31,7 @@ YOLOv11 선지 탐지 (30fps)
 ┌─────────────────────────────────────────────┐
 │ 화면 상태 배너 (우상단 실시간 표시)           │
 │                                             │
-│  [문제 인식 중] → [Gemma4 solving...] →     │
+│  [문제 인식 중] → [Gemma 3 solving...] →     │
 │  [Answer: N]                                │
 └─────────────────────────────────────────────┘
     │
@@ -75,11 +75,6 @@ jetson_classification/
 ├── train_yolo.py            # YOLOv11 선지 탐지 모델 학습
 ├── export_tensorrt.py       # YOLOv11 .pt → TensorRT .engine 변환
 ├── capture_app.py           # 카메라 독립 프리뷰 (선택 사용)
-│
-├── tests/
-│   ├── test_api.py          #   Gemma 3 단일 이미지 추론 테스트
-│   ├── test_camera_yolo.py  #   카메라 + YOLOv11 실시간 탐지 테스트
-│   └── check_models.py      #   로컬 Ollama 모델 목록 확인
 │
 ├── runs/                    # YOLOv11 학습 결과 (자동 생성)
 │   └── option_detect/weights/best.pt
