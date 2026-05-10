@@ -4,7 +4,7 @@
 # Captured images (large binary files)
 captured_images/
 
-# YOLOv8 학습 결과물
+# YOLOv11 학습 결과물
 runs/
 dataset_bbox/
 
@@ -29,3 +29,6 @@ Thumbs.db
 
 # pt
 *.pt
+
+# dataset
+On-Device.yolov11

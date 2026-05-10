@@ -1,5 +1,5 @@
 """
-YOLOv8 .pt → TensorRT .engine 변환 스크립트
+YOLOv11 .pt → TensorRT .engine 변환 스크립트
 
 Jetson Orin Nano의 GPU에 최적화된 .engine 파일을 생성합니다.
 TensorRT 엔진은 FP16 반정밀도를 사용하여 추론 속도를 극대화합니다.
@@ -30,7 +30,7 @@ DEFAULT_MODEL = PROJECT_DIR / "runs" / "option_detect" / "weights" / "best.pt"
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="YOLOv8 .pt 모델을 TensorRT .engine으로 변환합니다."
+        description="YOLOv11 .pt 모델을 TensorRT .engine으로 변환합니다."
     )
     parser.add_argument(
         "--model",
@@ -84,7 +84,7 @@ def main():
     use_half = args.half and not args.no_half
 
     print("=" * 60)
-    print("YOLOv8 → TensorRT 변환")
+    print("YOLOv11 → TensorRT 변환")
     print("=" * 60)
     print(f"  입력 모델    : {model_path}")
     print(f"  이미지 크기  : {args.imgsz}px")
@@ -113,7 +113,7 @@ def main():
         print("다음 사항을 확인하세요:")
         print("  1. TensorRT가 설치되어 있는가? (Jetson JetPack에 기본 포함)")
         print("  2. GPU(CUDA)가 사용 가능한가?")
-        print("     python -c \"import torch; print(torch.cuda.is_available())\"")
+        print('     python -c "import torch; print(torch.cuda.is_available())"')
         print("  3. 충분한 메모리가 있는가? (변환 시 약 2~4GB 사용)")
         return 1
 

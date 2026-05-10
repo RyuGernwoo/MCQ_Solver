@@ -1,9 +1,9 @@
 """
-YOLOv8 선지 영역 객체 탐지 모델 학습 스크립트
+YOLOv11 선지 영역 객체 탐지 모델 학습 스크립트
 
-수능 수학 객관식 선지(①~⑤)를 탐지하는 YOLOv8 모델을 학습합니다.
-Roboflow에서 Export한 폴리곤 라벨을 바운딩박스로 변환한 뒤,
-train/val 자동 분할 및 데이터 증강을 적용하여 학습합니다.
+수능 수학 객관식 선지(①~⑤)를 탐지하는 YOLOv11 모델을 학습합니다.
+'On-Device.yolov11' 데이터셋(151장, 바운딩박스 라벨)을 사용하여
+train/val 자동 분할 및 데이터 증강을 적용합니다.
 
 사용법:
     python train_yolo.py
@@ -21,63 +21,27 @@ from ultralytics import YOLO
 # 설정
 # ============================================================
 PROJECT_DIR = Path(__file__).parent
-DATASET_SRC = PROJECT_DIR / "option_label.yolov8"
+DATASET_SRC = PROJECT_DIR / "On-Device.yolov11"
 DATASET_DST = PROJECT_DIR / "dataset_bbox"
 
 # 학습 하이퍼파라미터
-MODEL_SIZE = "yolov8n.pt"   # nano 모델 (Jetson 온디바이스 추론 최적)
-EPOCHS = 150                # 데이터 47장 소규모이므로 충분한 에포크
+MODEL_SIZE = "yolo11n.pt"   # YOLOv11 nano 모델 (Jetson 온디바이스 추론 최적)
+EPOCHS = 150                # 충분한 학습 에포크
 BATCH_SIZE = 4              # Jetson Orin Nano 공유 메모리(7.6GB) 고려
-IMG_SIZE = 480              # 메모리 절약을 위해 축소 (640 → 480)
-VAL_RATIO = 0.2             # 검증 데이터 비율 (약 9장)
+IMG_SIZE = 480              # 메모리 절약을 위해 축소
+VAL_RATIO = 0.2             # 검증 데이터 비율 (약 30장)
 
 RANDOM_SEED = 42
 
 
 # ============================================================
-# 1단계: 폴리곤 라벨 → 바운딩박스 변환
-# ============================================================
-def polygon_to_bbox(label_line: str) -> str:
-    """
-    YOLO 폴리곤 형식 (class_id x1 y1 x2 y2 ... xn yn)을
-    YOLO 바운딩박스 형식 (class_id cx cy w h)으로 변환합니다.
-    
-    이미 바운딩박스 형식(값 5개)이면 그대로 반환합니다.
-    """
-    parts = label_line.strip().split()
-    if len(parts) < 2:
-        return None
-
-    class_id = parts[0]
-    coords = list(map(float, parts[1:]))
-
-    # 이미 bbox 형식인 경우 (class_id + 4개 값)
-    if len(coords) == 4:
-        return label_line.strip()
-
-    # 폴리곤 형식 → bbox 변환 (좌표가 x,y 쌍)
-    xs = coords[0::2]  # 짝수 인덱스 = x좌표
-    ys = coords[1::2]  # 홀수 인덱스 = y좌표
-
-    x_min, x_max = min(xs), max(xs)
-    y_min, y_max = min(ys), max(ys)
-
-    cx = (x_min + x_max) / 2
-    cy = (y_min + y_max) / 2
-    w = x_max - x_min
-    h = y_max - y_min
-
-    return f"{class_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}"
-
-
-# ============================================================
-# 2단계: 데이터셋 디렉토리 구성 (train/val 분할)
+# 1단계: 데이터셋 디렉토리 구성 (train/val 분할)
 # ============================================================
 def prepare_dataset():
     """
-    원본 데이터셋을 바운딩박스 라벨로 변환하고,
-    train/val로 분할하여 YOLOv8 학습용 디렉토리 구조를 생성합니다.
-    
+    원본 데이터셋('On-Device.yolov11')의 바운딩박스 라벨을 사용하여
+    train/val로 분할하고 YOLOv11 학습용 디렉토리 구조를 생성합니다.
+
     생성 구조:
         dataset_bbox/
         ├── data.yaml
@@ -118,7 +82,7 @@ def prepare_dataset():
     print(f"  학습 이미지: {len(train_files)}장")
     print(f"  검증 이미지: {len(val_files)}장")
 
-    converted_count = 0
+    label_count = 0
 
     for split, files in [("train", train_files), ("val", val_files)]:
         for img_path in files:
@@ -126,26 +90,17 @@ def prepare_dataset():
             dst_img = DATASET_DST / "images" / split / img_path.name
             shutil.copy2(img_path, dst_img)
 
-            # 라벨 변환 및 복사
+            # 라벨 복사 (이미 바운딩박스 형식)
             label_name = img_path.stem + ".txt"
             src_label = src_labels_dir / label_name
             dst_label = DATASET_DST / "labels" / split / label_name
 
             if src_label.exists():
+                shutil.copy2(src_label, dst_label)
                 with open(src_label, "r") as f:
-                    lines = f.readlines()
+                    label_count += len(f.readlines())
 
-                bbox_lines = []
-                for line in lines:
-                    converted = polygon_to_bbox(line)
-                    if converted:
-                        bbox_lines.append(converted)
-                        converted_count += 1
-
-                with open(dst_label, "w") as f:
-                    f.write("\n".join(bbox_lines) + "\n")
-
-    print(f"  변환된 어노테이션 수: {converted_count}개")
+    print(f"  총 어노테이션 수: {label_count}개")
 
     # data.yaml 생성
     data_config = {
@@ -167,15 +122,15 @@ def prepare_dataset():
 
 
 # ============================================================
-# 3단계: YOLOv8 모델 학습
+# 2단계: YOLOv11 모델 학습
 # ============================================================
 def train_model(data_yaml_path: Path):
     """
-    YOLOv8 객체 탐지 모델을 학습합니다.
-    소규모 데이터셋(47장)에 맞춰 데이터 증강 및 하이퍼파라미터를 조정합니다.
+    YOLOv11 객체 탐지 모델을 학습합니다.
+    151장 데이터셋에 맞춰 데이터 증강 및 하이퍼파라미터를 조정합니다.
     """
     print("=" * 60)
-    print("2단계: YOLOv8 모델 학습")
+    print("2단계: YOLOv11 모델 학습")
     print("=" * 60)
     print(f"  베이스 모델: {MODEL_SIZE}")
     print(f"  에포크: {EPOCHS}")
@@ -196,7 +151,7 @@ def train_model(data_yaml_path: Path):
         name="option_detect",
         exist_ok=True,
 
-        # 소규모 데이터셋 대응: 강화된 데이터 증강
+        # 데이터 증강
         augment=True,
         hsv_h=0.015,        # 색조 변화
         hsv_s=0.5,          # 채도 변화
@@ -235,7 +190,7 @@ def train_model(data_yaml_path: Path):
 
 
 # ============================================================
-# 4단계: 학습된 모델 검증
+# 3단계: 학습된 모델 검증
 # ============================================================
 def validate_model(best_model: Path, data_yaml_path: Path):
     """학습된 최적 모델로 검증 데이터셋에 대해 평가합니다."""
@@ -272,10 +227,10 @@ def validate_model(best_model: Path, data_yaml_path: Path):
 # 메인 실행
 # ============================================================
 if __name__ == "__main__":
-    # 1) 데이터 전처리 (폴리곤 → bbox 변환 + train/val 분할)
+    # 1) 데이터 전처리 (train/val 분할)
     data_yaml_path = prepare_dataset()
 
-    # 2) YOLOv8 학습
+    # 2) YOLOv11 학습
     best_model = train_model(data_yaml_path)
 
     # 3) 검증

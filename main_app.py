@@ -2,9 +2,9 @@
 수능 수학 객관식 자동 정답 표시 시스템 — 메인 애플리케이션
 
 기능:
-  - Main Thread: 카메라 프레임 읽기 → YOLO 실시간 추론 → 화면 출력
+  - Main Thread: 카메라 프레임 읽기 → YOLOv11 실시간 추론 → 화면 출력
   - Worker Thread: 사용자 캡처(Spacebar) → Gemini API 비동기 호출 → 정답 반환
-  - 정답 번호 + YOLO Bounding Box 매칭 → Alpha Blending 하이라이트
+  - 정답 번호 + YOLOv11 Bounding Box 매칭 → Alpha Blending 하이라이트
 
 사용법:
   python main_app.py [--model MODEL_PATH] [--camera CAMERA] [--conf 0.5]
@@ -38,7 +38,7 @@ DEFAULT_MODEL = PROJECT_DIR / "runs" / "option_detect" / "weights" / "best.pt"
 WINDOW_NAME = "Math Solver — Jetson"
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
-# YOLO 클래스 인덱스 → 선지 번호 매핑
+# YOLOv11 클래스 인덱스 → 선지 번호 매핑
 # 학습 시 클래스: opt_1(0), opt_2(1), opt_3(2), opt_4(3), opt_5(4)
 # Gemini 반환값: 1, 2, 3, 4, 5
 CLASS_TO_OPTION = {0: 1, 1: 2, 2: 3, 3: 4, 4: 5}
@@ -576,7 +576,7 @@ def main():
                     print("프레임을 읽을 수 없습니다.")
                     break
 
-            # --- YOLO 추론 (Main Thread) ---
+            # --- YOLOv11 추론 (Main Thread) ---
             results = model.predict(
                 frame, imgsz=args.imgsz, conf=args.conf, verbose=False
             )

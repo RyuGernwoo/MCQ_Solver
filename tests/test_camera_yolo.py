@@ -9,7 +9,7 @@ from ultralytics import YOLO
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_MODEL = PROJECT_DIR / "runs" / "option_detect" / "weights" / "best.pt"
-WINDOW_NAME = "YOLOv8 Real-time Test"
+WINDOW_NAME = "YOLOv11 Real-time Test"
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
